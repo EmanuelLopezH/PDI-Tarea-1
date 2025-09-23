@@ -13,24 +13,19 @@ def cargar_video(ruta_video):
         print("Error: No se puede abrir el video")
         return None
     
-    count = 0
-    while count < 33:  # Guardar los primeros 33 frames como imágenes
-        ret, frame = cap.read()
-        if not ret:
-            print("No se pudo leer el frame o se llegó al final del video")
-            break
-        count += 1
-    
-    # Obtener propiedades del video
-    fps = cap.get(cv.CAP_PROP_FPS)
-    frame_count = int(cap.get(cv.CAP_PROP_FRAME_COUNT))
-    width = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))
-    
-    print(f"Video cargado correctamente")
-    print(f"FPS: {fps}, Frames totales: {frame_count}")
-    print(f"Resolución: {width}x{height}")
-    
+    # Set the video to start at frame 39
+    if cap.set(cv.CAP_PROP_POS_FRAMES, 39):
+        # Get video properties
+        fps = cap.get(cv.CAP_PROP_FPS)
+        frame_count = int(cap.get(cv.CAP_PROP_FRAME_COUNT))
+        width = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))
+
+        print(f"Video cargado correctamente")
+        print(f"FPS: {fps}, Frames totales: {frame_count}")
+        print(f"Resolución: {width}x{height}")
+        print(f"Iniciando desde frame 39")
+            
     return cap, fps, frame_count, width, height
 def segmentacion(frame):
     hsv = cv.cvtColor(frame, cv.COLOR_BGR2HSV)
@@ -231,7 +226,7 @@ def calcular_datos_teoricos():
     
     # ========== DATOS EXPERIMENTALES ==========
     x0, y0 = 0.0, 0.53      # Posición inicial (m)
-    xf, yf = 0.323, 0.0     # Posición final (m)
+    xf, yf = 0.36, 0.0     # Posición final (m)
     tiempo_total = 0.35     # Tiempo experimental (s)
     g = 9.81                # Gravedad (m/s²)
     
@@ -461,7 +456,7 @@ datos_teoricos, parametros = calcular_datos_teoricos()
 
 # Parámetros
 SCALE="output/scale.txt"
-VIDEO_PATH = 'V2.mp4'
+VIDEO_PATH = 'V3.mp4'
 OUT_FOLDER = 'output'
 t=0.0; prev=None; v_prev=None
 positions=[]   # (t, x_px, y_px, x_m, y_m)
@@ -471,19 +466,15 @@ px_per_m = float(open(SCALE).read().strip())
 cap, fps, frame_count, width, height = cargar_video(VIDEO_PATH)
 dt = 1.0 / fps # Tiempo entre frames
 
-if cap is not None:
-    # Reiniciar el video al principio
-    cap.set(cv.CAP_PROP_POS_FRAMES, 0)
-    
+if cap is not None:    
     # Leer primer frame para calibrar origen
     ok, first_frame = cap.read()
     if ok:
         first_frame = cv.resize(first_frame, (320, 480))
         origen_x, origen_y = calibrar_origen(first_frame)
-        cap.set(cv.CAP_PROP_POS_FRAMES, 0)  # Reiniciar 
         frame_num = 0
         
-        while frame_num < 33:
+        while frame_num < 21:
             ok, frame = cap.read()
             if not ok:
                 print("Fin del video o error al leer frame")
@@ -552,8 +543,44 @@ if cap is not None:
         
         # Guardar en archivo CSV
         if positions:
-            df_positions = pd.DataFrame(positions, 
-                columns=['tiempo_s', 'cx_px', 'cy_px', 'x_m', 'y_m'])
+            df_positions = pd.DataFrame(positions, columns=['tiempo_s', 'cx_px', 'cy_px', 'x_m', 'y_m'])
+                # Agregar velocidades si existen
+        if vels:
+            # Crear DataFrame de velocidades
+            df_velocidades = pd.DataFrame(vels, 
+                columns=['t_mid', 'vx_ms', 'vy_ms'])
+            
+            # Interpolar velocidades a los tiempos de posición
+            from scipy.interpolate import interp1d
+            
+            # Solo si hay suficientes puntos para interpolación
+            if len(vels) > 1:
+                try:
+                    # Interpolación para vx
+                    f_vx = interp1d(df_velocidades['t_mid'], df_velocidades['vx_ms'], 
+                                kind='linear', fill_value='extrapolate')
+                    df_positions['vx_ms'] = f_vx(df_positions['tiempo_s'])
+                    
+                    # Interpolación para vy
+                    f_vy = interp1d(df_velocidades['t_mid'], df_velocidades['vy_ms'], 
+                                kind='linear', fill_value='extrapolate')
+                    df_positions['vy_ms'] = f_vy(df_positions['tiempo_s'])
+                    
+                    # Velocidad total
+                    df_positions['v_total_ms'] = np.sqrt(df_positions['vx_ms']**2 + df_positions['vy_ms']**2)
+                    
+                    print(f"✅ Velocidades interpoladas correctamente")
+                except Exception as e:
+                    print(f"⚠️ Error en interpolación: {e}")
+                    # Rellenar con NaN si falla la interpolación
+                    df_positions['vx_ms'] = np.nan
+                    df_positions['vy_ms'] = np.nan
+                    df_positions['v_total_ms'] = np.nan
+            else:
+                # Si no hay suficientes velocidades, rellenar con NaN
+                df_positions['vx_ms'] = np.nan
+                df_positions['vy_ms'] = np.nan
+                df_positions['v_total_ms'] = np.nan
             df_positions.to_csv('output/datos_experimentales.csv', index=False)
             print(f"💾 Datos guardados en: output/datos_experimentales.csv")
             generar_graficas_comparativas()
