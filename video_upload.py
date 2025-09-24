@@ -584,3 +584,4 @@ if cap is not None:
             df_positions.to_csv('output/datos_experimentales.csv', index=False)
             print(f"💾 Datos guardados en: output/datos_experimentales.csv")
             generar_graficas_comparativas()
+            
